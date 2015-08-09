@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+- [Core] Users are less able to run two copies of CKAN at the same time. (#1265 by: mgsdk, #1357 by pjf, politas? )
+
 ## v1.18.1
 
 ### Bugfixes
