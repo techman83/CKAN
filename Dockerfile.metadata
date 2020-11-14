@@ -1,0 +1,5 @@
+FROM mono:6.8
+RUN apt-get update && apt-get install -y python3 python3-pip git
+RUN python3 -m pip install "git+https://github.com/KSP-CKAN/NetKAN-Infra.git#egg=netkan-indexer&subdirectory=netkan" click
+ADD netkan.exe /usr/local/bin
+ADD ckan.exe /usr/local/bin
