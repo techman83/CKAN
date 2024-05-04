@@ -1,0 +1,97 @@
+name: Test CKAN + NetKAN
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  build-debug:
+    uses: ./.github/workflows/build.yml
+  test-mono:
+    needs: build-debug
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mono:
+          - latest
+          - '6.12'
+          - '6.10'
+          - '6.8'
+    container:
+      image: mono:${{ matrix.mono }}
+    steps:
+      - name: Adding HTTPS support to APT for old Mono images
+        run: |
+          apt-get update || true
+          apt-get install -y apt-transport-https
+      - name: Installing checkout/build dependencies
+        run: apt-get update && apt-get install -y git
+      - uses: actions/checkout@v4
+      - name: Install runtime dependencies
+        run: apt-get install -y xvfb
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '7'
+      - uses: actions/download-artifact@v4
+        with:
+          name: Debug-out
+          path: _build/out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: Debug-repack-unsigned
+          path: _build/repack/
+      - name: Run tests
+        run: xvfb-run ./build test+only --configuration=Debug --where="Category!=FlakyNetwork"
+
+  build-release:
+    uses: ./.github/workflows/build.yml
+    with:
+      configuration: Release
+  smoke-test-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Release-repack-unsigned
+          path: _build/repack/
+      - name: Run inflator container smoke test
+        working-directory: _build
+        run: |
+          cp -v repack/Release/netkan.exe .
+          docker build --tag inflator --file ../Dockerfile.netkan .
+          docker run --rm --name inflator --entrypoint /bin/bash inflator -c "
+            mono netkan.exe https://raw.githubusercontent.com/KSP-CKAN/NetKAN/master/NetKAN/ZeroMiniAVC.netkan
+          "
+      - name: Upload ckan.exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ckan.exe
+          path: _build/repack/Release/ckan.exe
+          retention-days: 7
+        if: github.event_name == 'pull_request'
+
+  notify:
+    needs:
+      - test-mono
+      - smoke-test-release
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Send Discord Notification
+        env:
+          JOB_STATUS: failure
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
+          HOOK_OS_NAME: ${{ runner.os }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+        if: env.WEBHOOK_URL
+        run: |
+          git clone https://github.com/DiscordHooks/github-actions-discord-webhook.git webhook
+          bash webhook/send.sh $JOB_STATUS $WEBHOOK_URL
+        shell: bash
